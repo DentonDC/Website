@@ -1,0 +1,14 @@
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+.env
+.env.*
+.idea/
+.vscode/
+*.swp
+*.swo
+node_modules/
+dist/
+.wrangler/
+.cloudflare/

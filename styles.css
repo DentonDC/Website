@@ -1,0 +1,99 @@
+:root {
+  color-scheme: dark;
+  --bg: #111114;
+  --card: #18181d;
+  --border: #2c2c34;
+  --text: #ece8e1;
+  --muted: #8d8b93;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  min-height: 100%;
+  min-height: 100dvh;
+  padding: 24px;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+}
+
+.card {
+  width: min(100%, 360px);
+  padding: 40px 32px 36px;
+  text-align: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+
+.avatar {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+  border-radius: 20px;
+}
+
+h1 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 6vw, 2.4rem);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.label {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.time {
+  margin: 18px 0 0;
+  font-size: clamp(1.8rem, 7vw, 2.15rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.date {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.hint {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 420px) {
+  body {
+    padding: 16px;
+    align-items: stretch;
+  }
+
+  .card {
+    width: 100%;
+    margin-block: auto;
+    padding: 32px 20px 28px;
+  }
+}

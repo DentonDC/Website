@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111114" />
+    <meta name="description" content="Denton — визитка" />
+    <title>Denton</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="card">
+      <img class="avatar" src="assets/avatar.svg" alt="" width="72" height="72" />
+      <h1>Denton</h1>
+      <p class="label">Москва · MSK</p>
+      <p class="time" id="msk-time" aria-live="polite">—</p>
+      <p class="date" id="msk-date"></p>
+      <noscript>
+        <p class="hint">Включите JavaScript, чтобы видеть текущее время.</p>
+      </noscript>
+    </main>
+    <script>
+      (function () {
+        var timeEl = document.getElementById("msk-time");
+        var dateEl = document.getElementById("msk-date");
+        var zone = "Europe/Moscow";
+
+        function tick() {
+          var now = new Date();
+          timeEl.textContent = new Intl.DateTimeFormat("ru-RU", {
+            timeZone: zone,
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          }).format(now);
+          dateEl.textContent = new Intl.DateTimeFormat("ru-RU", {
+            timeZone: zone,
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+          }).format(now);
+        }
+
+        tick();
+        setInterval(tick, 1000);
+      })();
+    </script>
+  </body>
+</html>
