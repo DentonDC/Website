@@ -11,4 +11,5 @@ desktop.ini
 node_modules/
 dist/
 .wrangler/
+.wrangler-functions-out/
 .cloudflare/
