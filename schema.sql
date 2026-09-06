@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS users (
   group_name TEXT,
   role TEXT NOT NULL,
   login_code_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  phone TEXT,
+  child_birthdate TEXT
 );
 
 CREATE TABLE IF NOT EXISTS invites (
@@ -85,6 +87,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS students (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  birthdate TEXT NOT NULL,
+  group_name TEXT,
+  parent_id TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_collection ON payments(collection_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_students_name ON students(name);

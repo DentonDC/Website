@@ -12,7 +12,7 @@
     parent: "Родитель",
   };
 
-  var ROUTES = ["dashboard", "sbor", "kassa", "news", "docs", "people", "log"];
+  var ROUTES = ["dashboard", "sbor", "kassa", "news", "docs", "students", "people", "log"];
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
@@ -27,6 +27,13 @@
   function when(iso) {
     if (!iso) return "";
     return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+  }
+
+  function birth(value) {
+    if (!value) return "";
+    var parts = String(value).split("-");
+    if (parts.length !== 3) return value;
+    return parts[2] + "." + parts[1] + "." + parts[0];
   }
 
   function route() {
@@ -84,6 +91,35 @@
     return Math.round(n * 100);
   }
 
+  function readFamily(body, requiredChild) {
+    var childName = String(body.child_name || "").trim();
+    var groupName = String(body.group_name || "").trim();
+    var phone = String(body.phone || "").trim();
+    if (phone) {
+      var digits = phone.replace(/\D/g, "");
+      if (digits.length < 10 || digits.length > 15) throw new Error("invalid_phone");
+    }
+    if (requiredChild && childName.length < 2) throw new Error("child_required");
+    var birthdate = String(body.child_birthdate || "").trim();
+    if (childName && !/^\d{4}-\d{2}-\d{2}$/.test(birthdate)) throw new Error("invalid_birthdate");
+    return { childName: childName, groupName: groupName, phone: phone, birthdate: childName ? birthdate : "" };
+  }
+
+  function addLocalStudent(db, actorId, name, birthdate, groupName, parentId) {
+    var item = {
+      id: uid(),
+      name: name,
+      birthdate: birthdate,
+      group_name: groupName || "",
+      parent_id: parentId || null,
+      created_at: now(),
+    };
+    db.students = db.students || [];
+    db.students.unshift(item);
+    localLog(db, actorId, "student_create", "student", item.id, name);
+    return item;
+  }
+
   function emptyDb() {
     return {
       users: [],
@@ -93,6 +129,7 @@
       payments: [],
       treasury: [],
       documents: [],
+      students: [],
       audit_log: [],
     };
   }
@@ -169,18 +206,25 @@
       if (db.users.length) return Promise.reject(new Error("already_setup"));
       var name = String(body.name || "").trim();
       if (name.length < 2) return Promise.reject(new Error("name_required"));
+      var family;
+      try { family = readFamily(body, false); } catch (error) { return Promise.reject(error); }
       var loginCode = makeCode();
       return hashCode(loginCode).then(function (hash) {
         var user = {
           id: uid(),
           name: name,
-          child_name: String(body.child_name || "").trim(),
-          group_name: String(body.group_name || "").trim(),
+          child_name: family.childName,
+          group_name: family.groupName,
+          phone: family.phone,
+          child_birthdate: family.birthdate,
           role: "admin",
           login_code_hash: hash,
           created_at: now(),
         };
         db.users.push(user);
+        if (family.childName && family.birthdate) {
+          addLocalStudent(db, user.id, family.childName, family.birthdate, family.groupName, user.id);
+        }
         localLog(db, user.id, "setup", "user", user.id, name);
         saveDb(db);
         sessionStorage.setItem("committee.sid", user.id);
@@ -191,6 +235,8 @@
       var db = loadDb();
       var name = String(body.name || "").trim();
       if (name.length < 2) return Promise.reject(new Error("invalid_join"));
+      var family;
+      try { family = readFamily(body, true); } catch (error) { return Promise.reject(error); }
       return hashCode(body.code).then(function (hash) {
         var invite = db.invites.find(function (i) { return i.code_hash === hash && !i.used_at; });
         if (!invite) return Promise.reject(new Error("invite_not_found"));
@@ -199,8 +245,10 @@
           var user = {
             id: uid(),
             name: name,
-            child_name: String(body.child_name || "").trim(),
-            group_name: String(body.group_name || "").trim(),
+            child_name: family.childName,
+            group_name: family.groupName,
+            phone: family.phone,
+            child_birthdate: family.birthdate,
             role: invite.role,
             login_code_hash: loginHash,
             created_at: now(),
@@ -208,6 +256,7 @@
           invite.used_by = user.id;
           invite.used_at = now();
           db.users.push(user);
+          addLocalStudent(db, user.id, family.childName, family.birthdate, family.groupName, user.id);
           localLog(db, user.id, "join", "user", user.id, name + " (" + invite.role + ")");
           saveDb(db);
           sessionStorage.setItem("committee.sid", user.id);
@@ -231,7 +280,67 @@
       return Promise.resolve({ ok: true });
     },
     members: function () {
-      return Promise.resolve({ members: loadDb().users.map(publicUser) });
+      var db = loadDb();
+      return Promise.resolve({
+        members: db.users.map(function (row) {
+          var item = publicUser(row);
+          if (canInvite(state.user)) item.phone = row.phone || "";
+          return item;
+        }),
+      });
+    },
+    students: function () {
+      var db = loadDb();
+      var asAdmin = canInvite(state.user);
+      return Promise.resolve({
+        students: (db.students || []).map(function (row) {
+          var parent = db.users.find(function (u) { return u.id === row.parent_id; });
+          var item = {
+            id: row.id,
+            name: row.name,
+            birthdate: row.birthdate,
+            group_name: row.group_name || "",
+            created_at: row.created_at,
+          };
+          if (asAdmin) {
+            item.parent_name = parent ? parent.name : "";
+            item.parent_phone = parent ? parent.phone || "" : "";
+          }
+          return item;
+        }),
+      });
+    },
+    createStudent: function (body) {
+      var db = loadDb();
+      var name = String(body.name || "").trim();
+      var birthdate = String(body.birthdate || "").trim();
+      if (name.length < 2) return Promise.reject(new Error("child_required"));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(birthdate)) return Promise.reject(new Error("invalid_birthdate"));
+      addLocalStudent(db, state.user.id, name, birthdate, String(body.group_name || "").trim(), null);
+      saveDb(db);
+      return Promise.resolve({ ok: true });
+    },
+    updateStudent: function (id, body) {
+      var db = loadDb();
+      var student = (db.students || []).find(function (s) { return s.id === id; });
+      if (!student) return Promise.reject(new Error("not_found"));
+      var name = String(body.name || "").trim();
+      var birthdate = String(body.birthdate || "").trim();
+      if (name.length < 2) return Promise.reject(new Error("child_required"));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(birthdate)) return Promise.reject(new Error("invalid_birthdate"));
+      student.name = name;
+      student.birthdate = birthdate;
+      student.group_name = String(body.group_name || "").trim();
+      localLog(db, state.user.id, "student_update", "student", id, name);
+      saveDb(db);
+      return Promise.resolve({ ok: true });
+    },
+    deleteStudent: function (id) {
+      var db = loadDb();
+      db.students = (db.students || []).filter(function (s) { return s.id !== id; });
+      localLog(db, state.user.id, "student_delete", "student", id, null);
+      saveDb(db);
+      return Promise.resolve({ ok: true });
     },
     setRole: function (memberId, body) {
       var db = loadDb();
@@ -496,6 +605,22 @@
     members: function () {
       return api("members", function () { return remote("members"); }, localApi.members);
     },
+    students: function () {
+      return api("students", function () { return remote("students"); }, localApi.students);
+    },
+    createStudent: function (body) {
+      return api("students", function () {
+        return remote("students", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      }, function () { return localApi.createStudent(body); });
+    },
+    updateStudent: function (id, body) {
+      return api("students", function () {
+        return remote("students/" + id, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      }, function () { return localApi.updateStudent(id, body); });
+    },
+    deleteStudent: function (id) {
+      return api("students", function () { return remote("students/" + id, { method: "DELETE" }); }, function () { return localApi.deleteStudent(id); });
+    },
     setRole: function (memberId, body) {
       return api("role", function () {
         return remote("members/" + memberId + "/role", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -586,7 +711,9 @@
         ? '<p class="note">Первый вход создаёт председателя. Дальше остальные заходят по приглашению.</p>' +
           '<form class="form" id="setup-form">' +
           '<label>Ваше имя<input name="name" required minlength="2" autocomplete="name"></label>' +
-          '<div class="form-row"><label>Имя ребёнка<input name="child_name"></label><label>Группа / класс<input name="group_name"></label></div>' +
+          '<label>Контактный телефон<input name="phone" type="tel" autocomplete="tel" placeholder="+7 900 000-00-00"></label>' +
+          '<div class="form-row"><label>Имя ребёнка<input name="child_name"></label><label>Дата рождения ребёнка<input name="child_birthdate" type="date"></label></div>' +
+          '<label>Группа / класс<input name="group_name"></label>' +
           '<button type="submit">Создать комитет</button><p class="error" data-error></p></form>'
         : "") +
       '<form class="form" id="login-form">' +
@@ -597,7 +724,9 @@
       "<h2>Приглашение</h2>" +
       '<label>Код приглашения<input name="code" required placeholder="ABCD-EFGH"></label>' +
       '<label>Ваше имя<input name="name" required minlength="2"></label>' +
-      '<div class="form-row"><label>Имя ребёнка<input name="child_name"></label><label>Группа / класс<input name="group_name"></label></div>' +
+      '<label>Контактный телефон<input name="phone" type="tel" autocomplete="tel" placeholder="+7 900 000-00-00"></label>' +
+      '<div class="form-row"><label>Имя ребёнка<input name="child_name" required minlength="2"></label><label>Дата рождения ребёнка<input name="child_birthdate" type="date" required></label></div>' +
+      '<label>Группа / класс<input name="group_name"></label>' +
       '<button class="ghost" type="submit">Присоединиться</button><p class="error" data-error></p></form>';
 
     bindForm("setup-form", function (data) {
@@ -638,6 +767,9 @@
       invite_not_found: "Приглашение уже использовано или его нет.",
       last_admin: "Нельзя снять единственного председателя.",
       invalid_role: "Такой роли нет.",
+      child_required: "Укажите имя ребёнка.",
+      invalid_birthdate: "Укажите дату рождения ребёнка.",
+      invalid_phone: "Проверьте номер телефона.",
       name_required: "Укажите имя.",
       already_setup: "Комитет уже создан. Войдите по коду.",
       forbidden: "Недостаточно прав.",
@@ -919,6 +1051,74 @@
     });
   }
 
+  function renderStudents(data) {
+    var items = data.students || [];
+    view.innerHTML =
+      "<h1>Учащиеся</h1>" +
+      banner() +
+      (canInvite(state.user)
+        ? '<form class="form" id="student-form"><h2>Добавить</h2>' +
+          '<label>Имя ребёнка<input name="name" required minlength="2"></label>' +
+          '<div class="form-row"><label>Дата рождения<input name="birthdate" type="date" required></label><label>Группа / класс<input name="group_name"></label></div>' +
+          '<button type="submit">Добавить в список</button><p class="error" data-error></p></form>'
+        : '<p class="note">Список пополняется при регистрации родителя. Изменять его может председатель.</p>') +
+      (items.length
+        ? '<div class="list">' +
+          items
+            .map(function (s) {
+              return (
+                '<article class="item">' +
+                (canInvite(state.user)
+                  ? '<form class="form" data-student="' +
+                    esc(s.id) +
+                    '"><div class="form-row"><label>Имя<input name="name" required value="' +
+                    esc(s.name) +
+                    '"></label><label>Дата рождения<input name="birthdate" type="date" required value="' +
+                    esc(s.birthdate) +
+                    '"></label></div><label>Группа / класс<input name="group_name" value="' +
+                    esc(s.group_name || "") +
+                    '"></label>' +
+                    (s.parent_name || s.parent_phone
+                      ? '<p class="muted">Родитель: ' +
+                        esc(s.parent_name || "") +
+                        (s.parent_phone ? " · " + esc(s.parent_phone) : "") +
+                        "</p>"
+                      : "") +
+                    '<div class="row"><button type="submit">Сохранить</button><button class="danger" type="button" data-del="' +
+                    esc(s.id) +
+                    '">Удалить</button></div><p class="error" data-error></p></form>'
+                  : "<h3>" +
+                    esc(s.name) +
+                    "</h3><p class=\"muted\">" +
+                    esc(birth(s.birthdate)) +
+                    (s.group_name ? " · " + esc(s.group_name) : "") +
+                    "</p>") +
+                "</article>"
+              );
+            })
+            .join("") +
+          "</div>"
+        : '<p class="note">Пока никого нет.</p>');
+    bindForm("student-form", function (payload) {
+      return client.createStudent(payload).then(render);
+    });
+    Array.prototype.forEach.call(view.querySelectorAll("[data-student]"), function (form) {
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        var err = form.querySelector("[data-error]");
+        if (err) err.textContent = "";
+        client.updateStudent(form.getAttribute("data-student"), Object.fromEntries(new FormData(form).entries())).then(render).catch(function (error) {
+          if (err) err.textContent = messageFor(error);
+        });
+      });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll("[data-del]"), function (btn) {
+      btn.addEventListener("click", function () {
+        client.deleteStudent(btn.getAttribute("data-del")).then(render);
+      });
+    });
+  }
+
   function renderPeople(data) {
     view.innerHTML =
       " <h1>Участники</h1>" +
@@ -953,6 +1153,7 @@
             (m.id === state.user.id ? ' <span class="muted">вы</span>' : "") +
             '</strong><div class="muted">' +
             esc([m.child_name, m.group_name].filter(Boolean).join(" · ")) +
+            (canInvite(state.user) && m.phone ? " · " + esc(m.phone) : "") +
             "</div></div>" +
             (canInvite(state.user)
               ? '<form class="role-form" data-role="' +
@@ -1014,6 +1215,9 @@
     login: "Вход",
     invite_create: "Приглашение",
     role_change: "Смена роли",
+    student_create: "Добавлен учащийся",
+    student_update: "Изменён учащийся",
+    student_delete: "Удалён учащийся",
     announce_create: "Объявление",
     announce_delete: "Удалено объявление",
     collection_create: "Открыт сбор",
@@ -1092,6 +1296,7 @@
     if (page === "kassa") return client.treasury().then(renderKassa);
     if (page === "news") return client.announcements().then(renderNews);
     if (page === "docs") return client.documents().then(renderDocs);
+    if (page === "students") return client.students().then(renderStudents);
     if (page === "people") {
       return Promise.all([client.members(), canInvite(state.user) ? client.invites() : Promise.resolve({ invites: [] })]).then(function (all) {
         renderPeople({ members: all[0].members || [], invites: all[1].invites || [], inviteCode: state.flash || "" });

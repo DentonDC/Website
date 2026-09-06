@@ -1,5 +1,5 @@
 import { canInvite, canManageMoney, canPublish, codeHint, getSessionUser, hashCode, isRole, makeCode, requireRole, requireUser } from "../functions/_lib/auth.js";
-import { ensureSchema, logAction, newId, nowIso, publicUser, rublesToCents } from "../functions/_lib/db.js";
+import { ensureSchema, logAction, newId, nowIso, parseBirthdate, parsePhone, publicUser, rublesToCents } from "../functions/_lib/db.js";
 import { clearCookie, cookieHeader, errorResponse, HttpError, json, readBody } from "../functions/_lib/http.js";
 
 export async function handleApi(request, env) {
@@ -31,9 +31,17 @@ async function route(env, request, parts, key, body, url) {
 
   const user = await requireUser(env, request);
 
-  if (key === "GET:members") return members(env);
+  if (key === "GET:members") return members(env, user);
   if (request.method === "POST" && parts[0] === "members" && parts[2] === "role") {
     return setMemberRole(env, user, parts[1], body);
+  }
+  if (key === "GET:students") return listStudents(env, user);
+  if (key === "POST:students") return createStudent(env, user, body);
+  if (request.method === "POST" && parts[0] === "students" && parts[1] && !parts[2]) {
+    return updateStudent(env, user, parts[1], body);
+  }
+  if (request.method === "DELETE" && parts[0] === "students" && parts[1]) {
+    return deleteStudent(env, user, parts[1]);
   }
   if (key === "POST:invites") return createInvite(env, user, body);
   if (key === "GET:invites") return listInvites(env, user);
@@ -104,18 +112,48 @@ async function session(env, request) {
   });
 }
 
+function readFamily(body, requiredChild) {
+  const childName = String(body.child_name || "").trim();
+  const groupName = String(body.group_name || "").trim();
+  const phone = parsePhone(body.phone);
+  if (phone === null) throw new HttpError(400, "invalid_phone");
+  if (requiredChild && childName.length < 2) throw new HttpError(400, "child_required");
+  let birthdate = "";
+  if (childName) {
+    birthdate = parseBirthdate(body.child_birthdate);
+    if (!birthdate) throw new HttpError(400, "invalid_birthdate");
+  }
+  return { childName, groupName, phone, birthdate };
+}
+
+async function addStudent(env, actorId, name, birthdate, groupName, parentId) {
+  const id = newId();
+  await env.DB.prepare(
+    `INSERT INTO students (id, name, birthdate, group_name, parent_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(id, name, birthdate, groupName || "", parentId || null, nowIso())
+    .run();
+  await logAction(env.DB, actorId, "student_create", "student", id, name);
+  return id;
+}
+
 async function setup(env, request, body) {
   if ((await userCount(env)) > 0) throw new HttpError(409, "already_setup");
   const name = String(body.name || "").trim();
   if (name.length < 2) throw new HttpError(400, "name_required");
+  const family = readFamily(body, false);
   const id = newId();
   const loginCode = makeCode();
   await env.DB.prepare(
-    `INSERT INTO users (id, name, child_name, group_name, role, login_code_hash, created_at)
-     VALUES (?, ?, ?, ?, 'admin', ?, ?)`
+    `INSERT INTO users (id, name, child_name, group_name, role, login_code_hash, created_at, phone, child_birthdate)
+     VALUES (?, ?, ?, ?, 'admin', ?, ?, ?, ?)`
   )
-    .bind(id, name, String(body.child_name || "").trim(), String(body.group_name || "").trim(), await hashCode(loginCode), nowIso())
+    .bind(id, name, family.childName, family.groupName, await hashCode(loginCode), nowIso(), family.phone, family.birthdate || null)
     .run();
+  if (family.childName && family.birthdate) {
+    await addStudent(env, id, family.childName, family.birthdate, family.groupName, id);
+  }
   await logAction(env.DB, id, "setup", "user", id, name);
   const response = await createSession(env, request, id);
   const data = await response.json();
@@ -130,6 +168,7 @@ async function join(env, request, body) {
   const code = String(body.code || "").trim();
   const name = String(body.name || "").trim();
   if (!code || name.length < 2) throw new HttpError(400, "invalid_join");
+  const family = readFamily(body, true);
   const invite = await env.DB.prepare("SELECT * FROM invites WHERE code_hash = ? AND used_at IS NULL")
     .bind(await hashCode(code))
     .first();
@@ -137,14 +176,15 @@ async function join(env, request, body) {
   const id = newId();
   const loginCode = makeCode();
   await env.DB.prepare(
-    `INSERT INTO users (id, name, child_name, group_name, role, login_code_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO users (id, name, child_name, group_name, role, login_code_hash, created_at, phone, child_birthdate)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, name, String(body.child_name || "").trim(), String(body.group_name || "").trim(), invite.role, await hashCode(loginCode), nowIso())
+    .bind(id, name, family.childName, family.groupName, invite.role, await hashCode(loginCode), nowIso(), family.phone, family.birthdate)
     .run();
   await env.DB.prepare("UPDATE invites SET used_by = ?, used_at = ? WHERE id = ?")
     .bind(id, nowIso(), invite.id)
     .run();
+  await addStudent(env, id, family.childName, family.birthdate, family.groupName, id);
   await logAction(env.DB, id, "join", "user", id, `${name} (${invite.role})`);
   const response = await createSession(env, request, id);
   const data = await response.json();
@@ -167,9 +207,74 @@ async function logout(request) {
   return json({ ok: true }, 200, { "Set-Cookie": clearCookie(isSecure(request)) });
 }
 
-async function members(env) {
-  const rows = await env.DB.prepare("SELECT id, name, child_name, group_name, role, created_at FROM users ORDER BY created_at").all();
-  return json({ members: rows.results || [] });
+async function members(env, user) {
+  const rows = await env.DB.prepare(
+    "SELECT id, name, child_name, group_name, role, created_at, phone FROM users ORDER BY created_at"
+  ).all();
+  const membersList = (rows.results || []).map((row) => {
+    const item = publicUser(row);
+    if (canInvite(user)) item.phone = row.phone || "";
+    return item;
+  });
+  return json({ members: membersList });
+}
+
+function publicStudent(row, asAdmin) {
+  const item = {
+    id: row.id,
+    name: row.name,
+    birthdate: row.birthdate,
+    group_name: row.group_name || "",
+    created_at: row.created_at,
+  };
+  if (asAdmin) {
+    item.parent_id = row.parent_id || "";
+    item.parent_name = row.parent_name || "";
+    item.parent_phone = row.parent_phone || "";
+  }
+  return item;
+}
+
+async function listStudents(env, user) {
+  const asAdmin = canInvite(user);
+  const rows = await env.DB.prepare(
+    `SELECT s.*, u.name AS parent_name, u.phone AS parent_phone
+     FROM students s LEFT JOIN users u ON u.id = s.parent_id
+     ORDER BY s.name`
+  ).all();
+  return json({ students: (rows.results || []).map((row) => publicStudent(row, asAdmin)) });
+}
+
+async function createStudent(env, user, body) {
+  requireRole(user, canInvite);
+  const name = String(body.name || "").trim();
+  const birthdate = parseBirthdate(body.birthdate);
+  if (name.length < 2) throw new HttpError(400, "child_required");
+  if (!birthdate) throw new HttpError(400, "invalid_birthdate");
+  const id = await addStudent(env, user.id, name, birthdate, String(body.group_name || "").trim(), null);
+  return json({ id });
+}
+
+async function updateStudent(env, user, id, body) {
+  requireRole(user, canInvite);
+  const student = await env.DB.prepare("SELECT * FROM students WHERE id = ?").bind(id).first();
+  if (!student) throw new HttpError(404, "not_found");
+  const name = String(body.name || "").trim();
+  const birthdate = parseBirthdate(body.birthdate);
+  if (name.length < 2) throw new HttpError(400, "child_required");
+  if (!birthdate) throw new HttpError(400, "invalid_birthdate");
+  await env.DB.prepare("UPDATE students SET name = ?, birthdate = ?, group_name = ? WHERE id = ?")
+    .bind(name, birthdate, String(body.group_name || "").trim(), id)
+    .run();
+  await logAction(env.DB, user.id, "student_update", "student", id, name);
+  return json({ ok: true });
+}
+
+async function deleteStudent(env, user, id) {
+  requireRole(user, canInvite);
+  await env.DB.prepare("DELETE FROM students WHERE id = ?").bind(id).run();
+  await logAction(env.DB, user.id, "student_delete", "student", id, null);
+  return json({ ok: true });
 }
 
 async function setMemberRole(env, user, memberId, body) {

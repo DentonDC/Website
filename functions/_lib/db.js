@@ -77,13 +77,50 @@ CREATE TABLE IF NOT EXISTS audit_log (
   details TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS students (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  birthdate TEXT NOT NULL,
+  group_name TEXT,
+  parent_id TEXT,
+  created_at TEXT NOT NULL
+);
 `;
+
+async function ensureColumn(db, table, column, type) {
+  try {
+    await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+  } catch {
+    /* column already exists */
+  }
+}
 
 export async function ensureSchema(db) {
   const statements = SCHEMA.split(";").map((s) => s.trim()).filter(Boolean);
   for (const sql of statements) {
     await db.prepare(sql).run();
   }
+  await ensureColumn(db, "users", "phone", "TEXT");
+  await ensureColumn(db, "users", "child_birthdate", "TEXT");
+}
+
+export function parseBirthdate(value) {
+  const raw = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const stamp = Date.parse(raw + "T00:00:00Z");
+  if (!Number.isFinite(stamp)) return null;
+  const now = Date.now();
+  if (stamp > now) return null;
+  if (stamp < Date.parse("1995-01-01T00:00:00Z")) return null;
+  return raw;
+}
+
+export function parsePhone(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return null;
+  return raw;
 }
 
 export function nowIso() {
