@@ -10,16 +10,25 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="card">
-      <img class="avatar" src="assets/avatar.svg" alt="" width="72" height="72" />
-      <h1>Denton</h1>
-      <p class="label">Москва · MSK</p>
-      <p class="time" id="msk-time" aria-live="polite">—</p>
-      <p class="date" id="msk-date"></p>
-      <noscript>
-        <p class="hint">Включите JavaScript, чтобы видеть текущее время.</p>
-      </noscript>
-    </main>
+    <div class="home">
+      <main class="card">
+        <img class="avatar" src="assets/avatar.svg" alt="" width="72" height="72" />
+        <h1>Denton</h1>
+        <p class="label">Москва · MSK</p>
+        <p class="time" id="msk-time" aria-live="polite">—</p>
+        <p class="date" id="msk-date"></p>
+        <noscript>
+          <p class="hint">Включите JavaScript, чтобы видеть текущее время.</p>
+        </noscript>
+      </main>
+      <nav class="home-links" aria-label="Родительский комитет">
+        <a href="committee/#dashboard">Комитет</a>
+        <a href="committee/#sbor">Сборы</a>
+        <a href="committee/#kassa">Касса</a>
+        <a href="committee/#news">Объявления</a>
+        <a href="committee/#docs">Документы</a>
+      </nav>
+    </div>
     <script>
       (function () {
         var timeEl = document.getElementById("msk-time");
