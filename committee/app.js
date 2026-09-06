@@ -233,6 +233,22 @@
     members: function () {
       return Promise.resolve({ members: loadDb().users.map(publicUser) });
     },
+    setRole: function (memberId, body) {
+      var db = loadDb();
+      var role = ROLE[body.role] ? body.role : "";
+      if (!role) return Promise.reject(new Error("invalid_role"));
+      var target = db.users.find(function (u) { return u.id === memberId; });
+      if (!target) return Promise.reject(new Error("member_not_found"));
+      if (target.role === "admin" && role !== "admin") {
+        var admins = db.users.filter(function (u) { return u.role === "admin"; }).length;
+        if (admins <= 1) return Promise.reject(new Error("last_admin"));
+      }
+      var previous = target.role;
+      target.role = role;
+      localLog(db, state.user.id, "role_change", "user", memberId, target.name + ": " + previous + " → " + role);
+      saveDb(db);
+      return Promise.resolve({ ok: true, role: role });
+    },
     createInvite: function (body) {
       var db = loadDb();
       var role = ROLE[body.role] ? body.role : "parent";
@@ -480,6 +496,11 @@
     members: function () {
       return api("members", function () { return remote("members"); }, localApi.members);
     },
+    setRole: function (memberId, body) {
+      return api("role", function () {
+        return remote("members/" + memberId + "/role", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      }, function () { return localApi.setRole(memberId, body); });
+    },
     createInvite: function (body) {
       return api("invites", function () {
         return remote("invites", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -615,6 +636,8 @@
     var map = {
       invalid_code: "Код не найден.",
       invite_not_found: "Приглашение уже использовано или его нет.",
+      last_admin: "Нельзя снять единственного председателя.",
+      invalid_role: "Такой роли нет.",
       name_required: "Укажите имя.",
       already_setup: "Комитет уже создан. Войдите по коду.",
       forbidden: "Недостаточно прав.",
@@ -920,17 +943,27 @@
             .join("") +
           "</div>"
         : "") +
+      "<h2>Состав</h2>" +
       '<div class="list">' +
       data.members
         .map(function (m) {
           return (
             '<article class="item"><div class="row"><div><strong>' +
             esc(m.name) +
+            (m.id === state.user.id ? ' <span class="muted">вы</span>' : "") +
             '</strong><div class="muted">' +
             esc([m.child_name, m.group_name].filter(Boolean).join(" · ")) +
-            '</div></div><span class="badge role">' +
-            esc(ROLE[m.role] || m.role) +
-            "</span></div></article>"
+            "</div></div>" +
+            (canInvite(state.user)
+              ? '<form class="role-form" data-role="' +
+                esc(m.id) +
+                '"><select name="role">' +
+                roleOptions(m.role) +
+                '</select><button type="submit">Назначить</button></form>'
+              : '<span class="badge role">' + esc(ROLE[m.role] || m.role) + "</span>") +
+            "</div>" +
+            (canInvite(state.user) ? '<p class="error" data-error></p>' : "") +
+            "</article>"
           );
         })
         .join("") +
@@ -941,7 +974,38 @@
         return render();
       });
     });
+    Array.prototype.forEach.call(view.querySelectorAll("[data-role]"), function (form) {
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        var err = form.closest("article").querySelector("[data-error]");
+        if (err) err.textContent = "";
+        var payload = Object.fromEntries(new FormData(form).entries());
+        var memberId = form.getAttribute("data-role");
+        client.setRole(memberId, payload).then(function () {
+          if (memberId === state.user.id) state.user.role = payload.role;
+          return render();
+        }).catch(function (error) {
+          if (err) err.textContent = messageFor(error);
+        });
+      });
+    });
     state.lastCode = "";
+  }
+
+  function roleOptions(current) {
+    return ["parent", "member", "treasurer", "admin"]
+      .map(function (role) {
+        return (
+          '<option value="' +
+          role +
+          '"' +
+          (role === current ? " selected" : "") +
+          ">" +
+          esc(ROLE[role]) +
+          "</option>"
+        );
+      })
+      .join("");
   }
 
   var ACTION = {
@@ -949,6 +1013,7 @@
     join: "Новый участник",
     login: "Вход",
     invite_create: "Приглашение",
+    role_change: "Смена роли",
     announce_create: "Объявление",
     announce_delete: "Удалено объявление",
     collection_create: "Открыт сбор",

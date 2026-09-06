@@ -32,6 +32,9 @@ async function route(env, request, parts, key, body, url) {
   const user = await requireUser(env, request);
 
   if (key === "GET:members") return members(env);
+  if (request.method === "POST" && parts[0] === "members" && parts[2] === "role") {
+    return setMemberRole(env, user, parts[1], body);
+  }
   if (key === "POST:invites") return createInvite(env, user, body);
   if (key === "GET:invites") return listInvites(env, user);
 
@@ -167,6 +170,21 @@ async function logout(request) {
 async function members(env) {
   const rows = await env.DB.prepare("SELECT id, name, child_name, group_name, role, created_at FROM users ORDER BY created_at").all();
   return json({ members: rows.results || [] });
+}
+
+async function setMemberRole(env, user, memberId, body) {
+  requireRole(user, canInvite);
+  const role = String(body.role || "");
+  if (!isRole(role)) throw new HttpError(400, "invalid_role");
+  const member = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(memberId).first();
+  if (!member) throw new HttpError(404, "member_not_found");
+  if (member.role === "admin" && role !== "admin") {
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").first();
+    if (Number(row?.n || 0) <= 1) throw new HttpError(400, "last_admin");
+  }
+  await env.DB.prepare("UPDATE users SET role = ? WHERE id = ?").bind(role, memberId).run();
+  await logAction(env.DB, user.id, "role_change", "user", memberId, `${member.name}: ${member.role} → ${role}`);
+  return json({ ok: true, role });
 }
 
 async function createInvite(env, user, body) {
