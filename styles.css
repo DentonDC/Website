@@ -20,6 +20,7 @@
 
 html {
   height: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -29,10 +30,12 @@ body {
   margin: 0;
   min-height: 100%;
   min-height: 100dvh;
-  padding: 24px;
+  padding: 16px;
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
+  overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -40,13 +43,13 @@ body {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 16px;
-  width: min(100%, 360px);
+  gap: 12px;
+  width: min(100%, 420px);
 }
 
 .card {
-  width: min(100%, 360px);
-  padding: 40px 32px 36px;
+  width: 100%;
+  padding: 32px 20px 28px;
   text-align: center;
   background: var(--card);
   border: 1px solid var(--border);
@@ -103,30 +106,29 @@ body {
 
 .home-links {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
 .home-links a {
-  display: block;
-  padding: 12px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 12px 14px;
   color: var(--text);
   text-align: center;
   text-decoration: none;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  font-size: 0.9rem;
+  font-size: 1rem;
 }
 
 .home-links a:hover,
 .home-links a:focus-visible {
   border-color: #4a4954;
   outline: none;
-}
-
-.home-links a:first-child {
-  grid-column: 1 / -1;
 }
 
 body.app {
@@ -138,14 +140,18 @@ body.app {
 .app-shell {
   width: min(100%, 880px);
   margin: 0 auto;
-  padding: 20px 16px 48px;
+  padding: 12px 14px 32px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-right: max(14px, env(safe-area-inset-right));
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  padding-left: max(14px, env(safe-area-inset-left));
 }
 
 .app-header {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .brand {
@@ -164,27 +170,38 @@ body.app {
 }
 
 .who {
-  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+}
+
+.who button {
+  margin-left: auto;
 }
 
 .app-nav {
   display: flex;
-  gap: 6px;
-  margin: 16px 0 20px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 18px;
 }
 
 .app-nav a {
-  flex: 0 0 auto;
-  padding: 8px 12px;
+  flex: 1 1 calc(50% - 8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 10px 12px;
   color: var(--muted);
+  text-align: center;
   text-decoration: none;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  font-size: 0.88rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 0.92rem;
 }
 
 .app-nav a.active,
@@ -202,7 +219,7 @@ body.app {
 }
 
 .app-main h1 {
-  font-size: 1.7rem;
+  font-size: 1.45rem;
 }
 
 .app-main h2 {
@@ -221,7 +238,7 @@ body.app {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
   margin: 0 0 20px;
 }
@@ -257,7 +274,9 @@ body.app {
 }
 
 .item {
-  padding: 14px 16px;
+  min-width: 0;
+  padding: 14px;
+  overflow-wrap: anywhere;
 }
 
 .item h3 {
@@ -266,27 +285,24 @@ body.app {
 }
 
 .role-form {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 8px;
-  align-items: center;
-  margin: 0;
+  width: 100%;
+  margin: 10px 0 0;
 }
 
-.role-form select {
-  width: auto;
-  min-width: 170px;
-}
-
+.role-form select,
 .role-form button {
-  padding: 10px 12px;
+  width: 100%;
 }
 
 .row {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .form {
@@ -297,7 +313,7 @@ body.app {
 
 .form-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -320,10 +336,12 @@ input,
 select,
 textarea {
   width: 100%;
-  padding: 10px 12px;
+  max-width: 100%;
+  padding: 12px;
   background: #121216;
   border: 1px solid var(--border);
   border-radius: 10px;
+  font-size: 16px;
 }
 
 textarea {
@@ -336,11 +354,13 @@ button,
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  padding: 10px 14px;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 14px;
   color: #111114;
   background: var(--accent);
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
   text-decoration: none;
 }
@@ -413,9 +433,10 @@ button.danger {
   margin: 8px 0 0;
   padding: 12px;
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 1.2rem;
-  letter-spacing: 0.12em;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
   text-align: center;
+  overflow-wrap: anywhere;
   background: #121216;
   border-radius: 10px;
 }
@@ -430,23 +451,109 @@ button.danger {
   gap: 16px;
 }
 
-@media (max-width: 420px) {
+@media (min-width: 720px) {
   body {
-    padding: 16px;
-    align-items: stretch;
+    padding: 24px;
+  }
+
+  .home {
+    width: min(100%, 360px);
+    gap: 16px;
   }
 
   .card {
-    width: 100%;
-    margin-block: auto;
-    padding: 32px 20px 28px;
+    width: min(100%, 360px);
+    padding: 40px 32px 36px;
   }
 
   .home .card {
-    margin-block: 0;
+    width: 100%;
+  }
+
+  .home-links {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .home-links a {
+    min-height: 0;
+    font-size: 0.9rem;
+  }
+
+  .home-links a:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .app-shell {
+    padding: 20px 16px 48px;
+  }
+
+  .app-header {
+    flex-direction: row;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .who {
+    margin-left: auto;
+    width: auto;
+  }
+
+  .app-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+  }
+
+  .app-nav a {
+    flex: 0 0 auto;
+    min-height: 0;
+    padding: 8px 12px;
+    border-color: transparent;
+    border-radius: 999px;
+    font-size: 0.88rem;
+  }
+
+  .app-main h1 {
+    font-size: 1.7rem;
+  }
+
+  .grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
   }
 
   .form-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .role-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    width: auto;
+    margin: 0;
+  }
+
+  .role-form select {
+    width: auto;
+    min-width: 170px;
+  }
+
+  .role-form button,
+  button,
+  .btn {
+    width: auto;
+  }
+
+  input,
+  select,
+  textarea {
+    padding: 10px 12px;
   }
 }
