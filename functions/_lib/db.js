@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS students (
   parent_id TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
 `;
 
 async function ensureColumn(db, table, column, type) {
@@ -102,6 +107,13 @@ export async function ensureSchema(db) {
   }
   await ensureColumn(db, "users", "phone", "TEXT");
   await ensureColumn(db, "users", "child_birthdate", "TEXT");
+  const count = await db.prepare("SELECT COUNT(*) AS n FROM groups").first();
+  if (Number(count?.n || 0) === 0) {
+    await db
+      .prepare("INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)")
+      .bind(crypto.randomUUID(), "2 ДО", new Date().toISOString())
+      .run();
+  }
 }
 
 export function parseBirthdate(value) {

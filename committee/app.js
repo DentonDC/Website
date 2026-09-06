@@ -1,9 +1,9 @@
 (function () {
-  var STORAGE = "committee.v1";
+  var STORAGE = "committee.v1"; // groups list: 2 ДО
   var view = document.getElementById("view");
   var nav = document.getElementById("nav");
   var who = document.getElementById("who");
-  var state = { user: null, local: false, needsSetup: false, lastCode: "", flash: "" };
+  var state = { user: null, local: false, needsSetup: false, lastCode: "", flash: "", groups: [] };
 
   var ROLE = {
     admin: "Председатель",
@@ -130,8 +130,36 @@
       treasury: [],
       documents: [],
       students: [],
+      groups: [{ id: "default-2do", name: "2 ДО", created_at: now() }],
       audit_log: [],
     };
+  }
+
+  function groupList() {
+    return state.groups && state.groups.length ? state.groups : [{ id: "default-2do", name: "2 ДО" }];
+  }
+
+  function groupSelect(selected, fieldName) {
+    var name = fieldName || "group_name";
+    return (
+      '<label>Группа / класс<select name="' +
+      name +
+      '"><option value="">Не указана</option>' +
+      groupList()
+        .map(function (g) {
+          return (
+            '<option value="' +
+            esc(g.name) +
+            '"' +
+            (g.name === selected ? " selected" : "") +
+            ">" +
+            esc(g.name) +
+            "</option>"
+          );
+        })
+        .join("") +
+      "</select></label>"
+    );
   }
 
   function loadDb() {
@@ -199,6 +227,7 @@
         user: publicUser(user),
         needs_setup: db.users.length === 0,
         db: false,
+        groups: db.groups && db.groups.length ? db.groups : [{ id: "default-2do", name: "2 ДО" }],
       });
     },
     setup: function (body) {
@@ -277,6 +306,50 @@
     },
     logout: function () {
       sessionStorage.removeItem("committee.sid");
+      return Promise.resolve({ ok: true });
+    },
+    groups: function () {
+      var db = loadDb();
+      return Promise.resolve({
+        groups: db.groups && db.groups.length ? db.groups : [{ id: "default-2do", name: "2 ДО" }],
+      });
+    },
+    createGroup: function (body) {
+      var db = loadDb();
+      var name = String(body.name || "").trim();
+      if (!name) return Promise.reject(new Error("invalid_group"));
+      db.groups = db.groups || [];
+      if (db.groups.some(function (g) { return g.name === name; })) return Promise.reject(new Error("group_exists"));
+      var item = { id: uid(), name: name, created_at: now() };
+      db.groups.push(item);
+      localLog(db, state.user.id, "group_create", "group", item.id, name);
+      saveDb(db);
+      return Promise.resolve(item);
+    },
+    updateGroup: function (id, body) {
+      var db = loadDb();
+      var group = (db.groups || []).find(function (g) { return g.id === id; });
+      if (!group) return Promise.reject(new Error("not_found"));
+      var name = String(body.name || "").trim();
+      if (!name) return Promise.reject(new Error("invalid_group"));
+      var previous = group.name;
+      group.name = name;
+      (db.students || []).forEach(function (s) {
+        if (s.group_name === previous) s.group_name = name;
+      });
+      db.users.forEach(function (u) {
+        if (u.group_name === previous) u.group_name = name;
+      });
+      localLog(db, state.user.id, "group_update", "group", id, name);
+      saveDb(db);
+      return Promise.resolve({ ok: true, name: name });
+    },
+    deleteGroup: function (id) {
+      var db = loadDb();
+      var group = (db.groups || []).find(function (g) { return g.id === id; });
+      db.groups = (db.groups || []).filter(function (g) { return g.id !== id; });
+      localLog(db, state.user.id, "group_delete", "group", id, group ? group.name : null);
+      saveDb(db);
       return Promise.resolve({ ok: true });
     },
     members: function () {
@@ -581,6 +654,7 @@
     session: function () {
       return api("session", function () { return remote("session"); }, localApi.session).then(function (data) {
         state.local = useLocal || data.db === false;
+        if (data.groups) state.groups = data.groups;
         return data;
       });
     },
@@ -601,6 +675,31 @@
     },
     logout: function () {
       return api("logout", function () { return remote("logout", { method: "POST" }); }, localApi.logout);
+    },
+    groups: function () {
+      return api("groups", function () { return remote("groups"); }, localApi.groups).then(function (data) {
+        state.groups = data.groups || [];
+        return data;
+      });
+    },
+    createGroup: function (body) {
+      return api("groups", function () {
+        return remote("groups", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      }, function () { return localApi.createGroup(body); }).then(function (data) {
+        return client.groups().then(function () { return data; });
+      });
+    },
+    updateGroup: function (id, body) {
+      return api("groups", function () {
+        return remote("groups/" + id, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      }, function () { return localApi.updateGroup(id, body); }).then(function (data) {
+        return client.groups().then(function () { return data; });
+      });
+    },
+    deleteGroup: function (id) {
+      return api("groups", function () { return remote("groups/" + id, { method: "DELETE" }); }, function () { return localApi.deleteGroup(id); }).then(function (data) {
+        return client.groups().then(function () { return data; });
+      });
     },
     members: function () {
       return api("members", function () { return remote("members"); }, localApi.members);
@@ -713,7 +812,7 @@
           '<label>Ваше имя<input name="name" required minlength="2" autocomplete="name"></label>' +
           '<label>Контактный телефон<input name="phone" type="tel" autocomplete="tel" placeholder="+7 900 000-00-00"></label>' +
           '<div class="form-row"><label>Имя ребёнка<input name="child_name"></label><label>Дата рождения ребёнка<input name="child_birthdate" type="date"></label></div>' +
-          '<label>Группа / класс<input name="group_name"></label>' +
+          groupSelect("") +
           '<button type="submit">Создать комитет</button><p class="error" data-error></p></form>'
         : "") +
       '<form class="form" id="login-form">' +
@@ -726,7 +825,7 @@
       '<label>Ваше имя<input name="name" required minlength="2"></label>' +
       '<label>Контактный телефон<input name="phone" type="tel" autocomplete="tel" placeholder="+7 900 000-00-00"></label>' +
       '<div class="form-row"><label>Имя ребёнка<input name="child_name" required minlength="2"></label><label>Дата рождения ребёнка<input name="child_birthdate" type="date" required></label></div>' +
-      '<label>Группа / класс<input name="group_name"></label>' +
+      groupSelect("") +
       '<button class="ghost" type="submit">Присоединиться</button><p class="error" data-error></p></form>';
 
     bindForm("setup-form", function (data) {
@@ -770,6 +869,8 @@
       child_required: "Укажите имя ребёнка.",
       invalid_birthdate: "Укажите дату рождения ребёнка.",
       invalid_phone: "Проверьте номер телефона.",
+      invalid_group: "Выберите группу из списка.",
+      group_exists: "Такая группа уже есть.",
       name_required: "Укажите имя.",
       already_setup: "Комитет уже создан. Войдите по коду.",
       forbidden: "Недостаточно прав.",
@@ -1057,9 +1158,26 @@
       "<h1>Учащиеся</h1>" +
       banner() +
       (canInvite(state.user)
-        ? '<form class="form" id="student-form"><h2>Добавить</h2>' +
+        ? '<section class="form"><h2>Группы / классы</h2>' +
+          groupList()
+            .map(function (g) {
+              return (
+                '<form class="role-form" data-group="' +
+                esc(g.id) +
+                '"><input name="name" required value="' +
+                esc(g.name) +
+                '"><button type="submit">Сохранить</button><button class="danger" type="button" data-del-group="' +
+                esc(g.id) +
+                '">Удалить</button></form>'
+              );
+            })
+            .join("") +
+          '<form class="role-form" id="group-form"><input name="name" required placeholder="Новая группа"><button type="submit">Добавить</button></form><p class="error" data-error></p></section>' +
+          '<form class="form" id="student-form"><h2>Добавить</h2>' +
           '<label>Имя ребёнка<input name="name" required minlength="2"></label>' +
-          '<div class="form-row"><label>Дата рождения<input name="birthdate" type="date" required></label><label>Группа / класс<input name="group_name"></label></div>' +
+          '<div class="form-row"><label>Дата рождения<input name="birthdate" type="date" required></label>' +
+          groupSelect("") +
+          "</div>" +
           '<button type="submit">Добавить в список</button><p class="error" data-error></p></form>'
         : '<p class="note">Список пополняется при регистрации родителя. Изменять его может председатель.</p>') +
       (items.length
@@ -1075,9 +1193,8 @@
                     esc(s.name) +
                     '"></label><label>Дата рождения<input name="birthdate" type="date" required value="' +
                     esc(s.birthdate) +
-                    '"></label></div><label>Группа / класс<input name="group_name" value="' +
-                    esc(s.group_name || "") +
-                    '"></label>' +
+                    '"></label></div>' +
+                    groupSelect(s.group_name || "") +
                     (s.parent_name || s.parent_phone
                       ? '<p class="muted">Родитель: ' +
                         esc(s.parent_name || "") +
@@ -1101,6 +1218,23 @@
         : '<p class="note">Пока никого нет.</p>');
     bindForm("student-form", function (payload) {
       return client.createStudent(payload).then(render);
+    });
+    bindForm("group-form", function (payload) {
+      return client.createGroup(payload).then(render);
+    });
+    Array.prototype.forEach.call(view.querySelectorAll("[data-group]"), function (form) {
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        client.updateGroup(form.getAttribute("data-group"), Object.fromEntries(new FormData(form).entries())).then(render).catch(function (error) {
+          var err = view.querySelector("section.form [data-error]");
+          if (err) err.textContent = messageFor(error);
+        });
+      });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll("[data-del-group]"), function (btn) {
+      btn.addEventListener("click", function () {
+        client.deleteGroup(btn.getAttribute("data-del-group")).then(render);
+      });
     });
     Array.prototype.forEach.call(view.querySelectorAll("[data-student]"), function (form) {
       form.addEventListener("submit", function (event) {
@@ -1218,6 +1352,9 @@
     student_create: "Добавлен учащийся",
     student_update: "Изменён учащийся",
     student_delete: "Удалён учащийся",
+    group_create: "Добавлена группа",
+    group_update: "Изменена группа",
+    group_delete: "Удалена группа",
     announce_create: "Объявление",
     announce_delete: "Удалено объявление",
     collection_create: "Открыт сбор",
@@ -1296,7 +1433,11 @@
     if (page === "kassa") return client.treasury().then(renderKassa);
     if (page === "news") return client.announcements().then(renderNews);
     if (page === "docs") return client.documents().then(renderDocs);
-    if (page === "students") return client.students().then(renderStudents);
+    if (page === "students") {
+      return Promise.all([client.students(), client.groups()]).then(function (all) {
+        renderStudents(all[0]);
+      });
+    }
     if (page === "people") {
       return Promise.all([client.members(), canInvite(state.user) ? client.invites() : Promise.resolve({ invites: [] })]).then(function (all) {
         renderPeople({ members: all[0].members || [], invites: all[1].invites || [], inviteCode: state.flash || "" });
@@ -1325,6 +1466,7 @@
       state.user = data.user;
       state.needsSetup = !!data.needs_setup;
       state.local = !data.db || useLocal;
+      state.groups = data.groups || [];
       return render();
     })
     .catch(function () {
@@ -1333,6 +1475,7 @@
       return localApi.session().then(function (data) {
         state.user = data.user;
         state.needsSetup = data.needs_setup;
+        state.groups = data.groups || [];
         return render();
       });
     });

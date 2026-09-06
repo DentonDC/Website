@@ -24,6 +24,7 @@ export async function handleApi(request, env) {
 
 async function route(env, request, parts, key, body, url) {
   if (key === "GET:session") return session(env, request);
+  if (key === "GET:groups") return listGroups(env);
   if (key === "POST:setup") return setup(env, request, body);
   if (key === "POST:join") return join(env, request, body);
   if (key === "POST:login") return login(env, request, body);
@@ -42,6 +43,13 @@ async function route(env, request, parts, key, body, url) {
   }
   if (request.method === "DELETE" && parts[0] === "students" && parts[1]) {
     return deleteStudent(env, user, parts[1]);
+  }
+  if (key === "POST:groups") return createGroup(env, user, body);
+  if (request.method === "POST" && parts[0] === "groups" && parts[1] && !parts[2]) {
+    return updateGroup(env, user, parts[1], body);
+  }
+  if (request.method === "DELETE" && parts[0] === "groups" && parts[1]) {
+    return deleteGroup(env, user, parts[1]);
   }
   if (key === "POST:invites") return createInvite(env, user, body);
   if (key === "GET:invites") return listInvites(env, user);
@@ -103,18 +111,76 @@ async function userCount(env) {
   return Number(row?.n || 0);
 }
 
+async function listGroupRows(env) {
+  const rows = await env.DB.prepare("SELECT id, name, created_at FROM groups ORDER BY name").all();
+  return rows.results || [];
+}
+
+async function resolveGroup(env, name) {
+  const raw = String(name || "").trim();
+  if (!raw) return "";
+  const row = await env.DB.prepare("SELECT name FROM groups WHERE name = ?").bind(raw).first();
+  if (!row) throw new HttpError(400, "invalid_group");
+  return row.name;
+}
+
+async function listGroups(env) {
+  return json({ groups: await listGroupRows(env) });
+}
+
+async function createGroup(env, user, body) {
+  requireRole(user, canInvite);
+  const name = String(body.name || "").trim();
+  if (name.length < 1) throw new HttpError(400, "invalid_group");
+  const id = newId();
+  try {
+    await env.DB.prepare("INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)")
+      .bind(id, name, nowIso())
+      .run();
+  } catch {
+    throw new HttpError(409, "group_exists");
+  }
+  await logAction(env.DB, user.id, "group_create", "group", id, name);
+  return json({ id, name });
+}
+
+async function updateGroup(env, user, id, body) {
+  requireRole(user, canInvite);
+  const group = await env.DB.prepare("SELECT * FROM groups WHERE id = ?").bind(id).first();
+  if (!group) throw new HttpError(404, "not_found");
+  const name = String(body.name || "").trim();
+  if (name.length < 1) throw new HttpError(400, "invalid_group");
+  await env.DB.prepare("UPDATE groups SET name = ? WHERE id = ?").bind(name, id).run();
+  if (group.name !== name) {
+    await env.DB.prepare("UPDATE students SET group_name = ? WHERE group_name = ?").bind(name, group.name).run();
+    await env.DB.prepare("UPDATE users SET group_name = ? WHERE group_name = ?").bind(name, group.name).run();
+  }
+  await logAction(env.DB, user.id, "group_update", "group", id, name);
+  return json({ ok: true, name });
+}
+
+async function deleteGroup(env, user, id) {
+  requireRole(user, canInvite);
+  const group = await env.DB.prepare("SELECT * FROM groups WHERE id = ?").bind(id).first();
+  if (!group) throw new HttpError(404, "not_found");
+  await env.DB.prepare("DELETE FROM groups WHERE id = ?").bind(id).run();
+  await logAction(env.DB, user.id, "group_delete", "group", id, group.name);
+  return json({ ok: true });
+}
+
 async function session(env, request) {
   const user = await getSessionUser(env, request);
   return json({
     user: publicUser(user),
     needs_setup: (await userCount(env)) === 0,
     db: true,
+    groups: await listGroupRows(env),
   });
 }
 
-function readFamily(body, requiredChild) {
+async function readFamily(env, body, requiredChild) {
   const childName = String(body.child_name || "").trim();
-  const groupName = String(body.group_name || "").trim();
+  const groupName = await resolveGroup(env, body.group_name);
   const phone = parsePhone(body.phone);
   if (phone === null) throw new HttpError(400, "invalid_phone");
   if (requiredChild && childName.length < 2) throw new HttpError(400, "child_required");
@@ -142,7 +208,7 @@ async function setup(env, request, body) {
   if ((await userCount(env)) > 0) throw new HttpError(409, "already_setup");
   const name = String(body.name || "").trim();
   if (name.length < 2) throw new HttpError(400, "name_required");
-  const family = readFamily(body, false);
+  const family = await readFamily(env, body, false);
   const id = newId();
   const loginCode = makeCode();
   await env.DB.prepare(
@@ -168,7 +234,7 @@ async function join(env, request, body) {
   const code = String(body.code || "").trim();
   const name = String(body.name || "").trim();
   if (!code || name.length < 2) throw new HttpError(400, "invalid_join");
-  const family = readFamily(body, true);
+  const family = await readFamily(env, body, true);
   const invite = await env.DB.prepare("SELECT * FROM invites WHERE code_hash = ? AND used_at IS NULL")
     .bind(await hashCode(code))
     .first();
@@ -251,7 +317,7 @@ async function createStudent(env, user, body) {
   const birthdate = parseBirthdate(body.birthdate);
   if (name.length < 2) throw new HttpError(400, "child_required");
   if (!birthdate) throw new HttpError(400, "invalid_birthdate");
-  const id = await addStudent(env, user.id, name, birthdate, String(body.group_name || "").trim(), null);
+  const id = await addStudent(env, user.id, name, birthdate, await resolveGroup(env, body.group_name), null);
   return json({ id });
 }
 
@@ -264,7 +330,7 @@ async function updateStudent(env, user, id, body) {
   if (name.length < 2) throw new HttpError(400, "child_required");
   if (!birthdate) throw new HttpError(400, "invalid_birthdate");
   await env.DB.prepare("UPDATE students SET name = ?, birthdate = ?, group_name = ? WHERE id = ?")
-    .bind(name, birthdate, String(body.group_name || "").trim(), id)
+    .bind(name, birthdate, await resolveGroup(env, body.group_name), id)
     .run();
   await logAction(env.DB, user.id, "student_update", "student", id, name);
   return json({ ok: true });
