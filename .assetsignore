@@ -1,0 +1,11 @@
+functions
+src
+schema.sql
+README.md
+.gitignore
+.wrangler
+.wrangler-functions-out
+.git
+_routes.json
+.assetsignore
+wrangler.toml
